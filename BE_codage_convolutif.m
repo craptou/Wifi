@@ -77,7 +77,7 @@ for ii = 1:length(EbN0dB)
     % Puissance P du signal OFDM émis (enveloppe complexe)
     P = mean(abs(x).^2);
 
-    %% ----- 5) Canal TGn-B : génération h[n] stationnaire (1 réalisation) -----
+    % ----- 5) Canal TGn-B : génération h[n] stationnaire (1 réalisation) -----
     % convolution + tronquage pour garder la taille
     y_chan = conv(x, h);
     y_chan = y_chan(1:length(x));
