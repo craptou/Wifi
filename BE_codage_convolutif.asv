@@ -7,7 +7,7 @@ clear; close all; clc;
 N   = 64;        % FFT size (nb sous-porteuses)
 Nu  = 48;        % nb porteuses utiles (data)
 Ncp = 16;        % préfixe cyclique
-Nsym = 10000;      % nb symboles OFDM simulés (augmente pour lisser la courbe)
+Nsym = 200;      % nb symboles OFDM simulés (augmente pour lisser la courbe)
 
 M = 4;           % QPSK
 k = log2(M);     % bits / symbole QAM
@@ -54,16 +54,20 @@ for ii = 1:length(EbN0dB)
     % ----- 1) Génération bits -----
     Nb = Nu * Nsym * k;                 % bits utiles transmis
     bits = randi([0 1], Nb, 1);
+    
+    % ----- Codage Convalutif ----------
+    trellis = poly2trellis(3, [5 7]); % Définir le treillis pour le codage
+    codedBits = convenc(bits, trellis);   % Codage convalutif
 
     % ----- 2) Mapping QPSK (Gray, puissance unitaire) -----
     % qammod avec InputType 'bit' produit directement les symboles complexes
-    symb = qammod(bits, M, ...
+    symb = qammod(codedBits, M, ...
         "InputType","bit", ...
         "UnitAveragePower",true);
 
     % ----- 3) Grille OFDM (N x Nsym), autres porteuses à 0 -----
     Xf = zeros(N, Nsym);
-    Xf(dataIdx,:) = reshape(symb, Nu, Nsym);
+    Xf(1:Nu,:) = reshape(symb, Nu, Nsym);
 
     % ----- 4) IFFT + CP -----
     xt = ifft(Xf, N, 1);                        % (N x Nsym)
@@ -109,6 +113,10 @@ for ii = 1:length(EbN0dB)
     bits_hat_MMSE = qamdemod(symb_hat_MMSE, M, ...
         "OutputType","bit", ...
         "UnitAveragePower",true);
+
+    % ----- Décodage de Viterbi --------
+    bits_hat_ZF = vitdec(bits_hat_ZF, trellis, 34, 'trunc', 'hard');  % Décodage de Viterbi pour ZF
+    bits_hat_MMSE = vitdec(bits_hat_MMSE, trellis, 34, 'trunc', 'hard'); % Décodage de Viterbi pour MMSE
 
     % ----- 11) TEB -----
     TEB_ZF(ii)   = mean(bits_hat_ZF   ~= bits);
