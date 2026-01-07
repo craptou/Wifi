@@ -9,6 +9,9 @@ clear; close all; clc;
 % ----- Paramètres -----
 P = params_ofdm();
 nb_symb_ofdm = 10000;     % à réduire si c'est trop long
+fprintf("Nfft=%d, Nu=%d, Ncp=%d, QPSK(M=%d), nbSymb=%d\n", ...
+    P.Nfft, P.Nu, P.Ncp, P.M, nb_symb_ofdm);
+
 
 % ----- Canal fixe (même réalisation pour comparer proprement) -----
 [h, H, Heff] = tgnb_channel(P, P.seed_canal);

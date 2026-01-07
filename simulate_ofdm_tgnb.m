@@ -6,9 +6,6 @@ function TEB = simulate_ofdm_tgnb(P, nb_symb_ofdm, h, Heff, activer_codage)
 %   nb_symb_ofdm   : nombre de symboles OFDM simulés (sans codage)
 %   h, Heff        : canal (fixe) en temporel et fréquentiel
 %   activer_codage : true -> code convolutif + Viterbi hard
-%
-% Sortie :
-%   TEB : vecteur TEB(Eb/N0) sur la grille P.EbN0_dB
 
 TEB = zeros(size(P.EbN0_dB));
 
@@ -55,10 +52,9 @@ for ii = 1:length(P.EbN0_dB)
     % ============================================================
     % 4) IFFT + ajout préfixe cyclique
     % ============================================================
-    xt = ifft(Xf, P.Nfft, 1);                         % (Nfft x nb_symb)
+    xt = ifft(Xf, P.Nfft);                         % (Nfft x nb_symb)
     xt_cp = [xt(end-P.Ncp+1:end,:); xt];              % (Nfft+Ncp x nb_symb)
-    x = xt_cp(:);                                     % sérialisation
-
+    x = xt_cp(:);                                     
     puissance_tx = mean(abs(x).^2);
 
     % ============================================================
@@ -68,7 +64,7 @@ for ii = 1:length(P.EbN0_dB)
     y_canal = y_canal(1:length(x));   % tronquage pour garder la même taille
 
     % ============================================================
-    % 6) Ajout AWGN calibré via Eb/N0 (formule du sujet)
+    % 6) Ajout bruit AWGN
     % ============================================================
     EbN0 = 10^(P.EbN0_dB(ii)/10);
 
@@ -107,7 +103,7 @@ for ii = 1:length(P.EbN0_dB)
     end
 
     % ============================================================
-    % 10) Calcul TEB (comparaison aux bits d'information)
+    % 10) Calcul TEB 
     % ============================================================
     TEB(ii) = mean(bits_estimes ~= bits_info);
 end

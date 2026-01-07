@@ -1,8 +1,5 @@
 function P = params_ofdm()
-%PARAMS_OFDM  Paramètres communs du projet OFDM (version simple).
-%
-% Cette fonction centralise toutes les constantes de simulation
-% pour éviter les "valeurs en dur" dans les scripts.
+%PARAMS_OFDM  Paramètres communs du projet.
 
 % ---------- OFDM ----------
 P.Nfft  = 64;   % taille FFT (nombre total de sous-porteuses)
@@ -31,6 +28,6 @@ P.p_dB   = [0 -5.4 -10.8 -16.2 -21.6 -27 -32.4 -37.8 -43.2];  % puissances (dB)
 P.p_lin  = 10.^(P.p_dB/10);                                   % puissances (lin)
 
 % ---------- Reproductibilité ----------
-P.seed_canal = 1;         % graine RNG pour fixer une réalisation de canal
+P.seed_canal = 3;         % graine RNG pour fixer une réalisation de canal
 
 end

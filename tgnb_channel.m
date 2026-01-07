@@ -4,12 +4,10 @@ function [h, H, Heff, delais_ech] = tgnb_channel(P, seed)
 % Sorties :
 %   h         : réponse impulsionnelle discrète du canal
 %   H         : réponse fréquentielle H[k] sur Nfft points (FFT de h)
-%   Heff      : H[k] "sécurisé" (évite division par 0 pour ZF)
+%   Heff      : H[k] 
 %   delais_ech: retards en nombre d'échantillons
 
-if nargin < 2 || isempty(seed)
-    seed = P.seed_canal;
-end
+
 rng(seed);
 
 % Conversion retards (ns) -> retards en échantillons
@@ -27,9 +25,7 @@ end
 % Réponse fréquentielle sur Nfft
 H = fft(h, P.Nfft);
 
-% Protection contre les valeurs très petites (division en ZF)
-epsH = 1e-12;
 Heff = H;
-Heff(abs(Heff) < epsH) = epsH;
+
 
 end
