@@ -1,30 +1,36 @@
 function P = params_ofdm()
-%PARAMS_OFDM  Paramètres communs du projet.
+%PARAMS_OFDM  Paramètres communs du projet OFDM (version simple).
+%
+% Cette fonction centralise toutes les constantes de simulation
+% pour éviter les "valeurs en dur" dans les scripts.
 
-P.N    = 64;
-P.Nu   = 48;
-P.Ncp  = 16;
+% ---------- OFDM ----------
+P.Nfft  = 64;   % taille FFT (nombre total de sous-porteuses)
+P.Nu    = 48;   % nombre de sous-porteuses utiles (porteuses "data")
+P.Ncp   = 16;   % longueur du préfixe cyclique
 
-P.M    = 4;                 % QPSK
-P.k    = log2(P.M);
+% Indices des porteuses utiles (version simplifiée : les Nu premières)
+% Remarque : dans la norme 802.11a, l'allocation est centrée autour de DC
+% (on fera ça plus tard).
+P.idx_data = 1:P.Nu;
 
-P.EbN0dB = 0:2:30;
+% ---------- Modulation ----------
+P.M = 4;                 % QPSK (4-QAM)
+P.k = log2(P.M);         % bits par symbole (2 en QPSK)
 
-%Fe = 20 MHz => Ts = 50 ns
-P.Fe = 20e6;
-P.Ts = 1/P.Fe;
+% ---------- Courbe Eb/N0 ----------
+P.EbN0_dB = 0:2:30;
 
-% Version simple (AWGN): ici tu mets les 48 premières à 0..Nu-1
-% (Plus tard, tu remplaceras par les indices 802.11a de la norme)
-P.dataIdx = 1:P.Nu;
+% ---------- Echantillonnage (sujet) ----------
+P.Fe = 20e6;             % 20 MHz
+P.Te = 1/P.Fe;           % période d'échantillonnage
 
-% TGn-B (valeurs sujet)
-P.tau_ns = [0 10 20 30 50 80 110 140 170];
-P.p_db = [0 -5.4 -10.8 -16.2 -21.6 -27 -32.4 -37.8 -43.2];
-P.p_lin = 10.^(P.p_db/10);
+% ---------- Canal TGn-B (sujet) ----------
+P.tau_ns = [0 10 20 30 50 80 110 140 170];                    % retards (ns)
+P.p_dB   = [0 -5.4 -10.8 -16.2 -21.6 -27 -32.4 -37.8 -43.2];  % puissances (dB)
+P.p_lin  = 10.^(P.p_dB/10);                                   % puissances (lin)
 
-% Canal fixe par défaut pour comparaisons
-P.fixChannel = true;
-P.seedChannel = 1;
+% ---------- Reproductibilité ----------
+P.seed_canal = 1;         % graine RNG pour fixer une réalisation de canal
 
 end

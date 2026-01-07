@@ -1,34 +1,44 @@
 %%%%%%%
 % main_compare.m
-% TGn-B + ZF : comparaison non codé vs codé (hard/soft)
+% OFDM sur canal TGn-B + AWGN, égalisation ZF
+% Comparaison : non codé vs codé convolutif (Viterbi hard)
 %%%%%%%
+
 clear; close all; clc;
 
+% ----- Paramètres -----
 P = params_ofdm();
-Nsym = 10000;
+nb_symb_ofdm = 10000;     % à réduire si c'est trop long
 
-% Canal fixe pour comparaisons
-[h, H, Heff] = tgnb_channel(P, P.seedChannel);
+% ----- Canal fixe (même réalisation pour comparer proprement) -----
+[h, H, Heff] = tgnb_channel(P, P.seed_canal);
 
-fprintf("Non code...\n");
-TEB_unc = simulate_ofdm_tgnb(P, Nsym, h, Heff, false, 'hard');
+% ----- Simulations -----
+fprintf("Simulation non codee...\n");
+TEB_non_code = simulate_ofdm_tgnb(P, nb_symb_ofdm, h, Heff, false);
 
-fprintf("Code conv (hard)...\n");
-TEB_hard = simulate_ofdm_tgnb(P, Nsym, h, Heff, true, 'hard');
+fprintf("Simulation codee (conv + Viterbi hard)...\n");
+TEB_code_hard = simulate_ofdm_tgnb(P, nb_symb_ofdm, h, Heff, true);
 
-fprintf("Code conv (soft)...\n");
-TEB_soft = simulate_ofdm_tgnb(P, Nsym, h, Heff, true, 'soft');
-
+% ----- Tracé TEB -----
 figure;
-semilogy(P.EbN0dB, TEB_unc,  "o-"); grid on; hold on;
-semilogy(P.EbN0dB, TEB_hard, "s-");
-semilogy(P.EbN0dB, TEB_soft, "d-");
+semilogy(P.EbN0_dB, TEB_non_code, 'o-'); grid on; hold on;
+semilogy(P.EbN0_dB, TEB_code_hard, 's-');
 xlabel("E_b/N_0 (dB)");
 ylabel("TEB");
-legend("ZF non codé", "ZF codé - Viterbi hard", "ZF codé - Viterbi soft", "Location","southwest");
-title(sprintf("OFDM TGn-B (seed=%d) + AWGN - QPSK - ZF : hard vs soft", P.seedChannel));
+legend("ZF non codé", "ZF codé (Viterbi hard)", "Location","southwest");
+title(sprintf("OFDM TGn-B (seed=%d) + AWGN - QPSK - Egalisation ZF", P.seed_canal));
 
+% ----- Visualisation du canal -----
 figure;
-subplot(2,1,1); plot(abs(H)); grid on; title("|H[k]| (TGn-B)");
-subplot(2,1,2); plot(angle(H)); grid on; title("Phase(H[k]) (TGn-B)");
+subplot(2,1,1);
+plot(abs(H)); grid on;
+title("|H[k]| (canal TGn-B)");
+xlabel("Indice sous-porteuse k");
+ylabel("|H[k]|");
 
+subplot(2,1,2);
+plot(angle(H)); grid on;
+title("Phase(H[k]) (canal TGn-B)");
+xlabel("Indice sous-porteuse k");
+ylabel("angle(H[k])");

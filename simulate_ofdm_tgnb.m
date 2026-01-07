@@ -1,135 +1,115 @@
-function TEB_ZF = simulate_ofdm_tgnb(P, Nsym, h, Heff, useCoding, decodeType)
-%SIMULATE_OFDM_TGNB  TEB sur TGn-B + AWGN avec égalisation ZF.
-% Supporte: non codé, codé convolutif R=1/2 (K=3, [5 7]) en Viterbi hard/soft.
+function TEB = simulate_ofdm_tgnb(P, nb_symb_ofdm, h, Heff, activer_codage)
+%SIMULATE_OFDM_TGNB  Simulation OFDM sur canal TGn-B + AWGN, égalisation ZF.
 %
-%   TEB_ZF = simulate_ofdm_tgnb(P, Nsym, h, Heff, useCoding, decodeType)
+% Entrées :
+%   P              : paramètres (struct)
+%   nb_symb_ofdm   : nombre de symboles OFDM simulés (sans codage)
+%   h, Heff        : canal (fixe) en temporel et fréquentiel
+%   activer_codage : true -> code convolutif + Viterbi hard
 %
-% decodeType : 'hard' ou 'soft' (uniquement si useCoding=true)
+% Sortie :
+%   TEB : vecteur TEB(Eb/N0) sur la grille P.EbN0_dB
 
-if nargin < 6 || isempty(decodeType)
-    decodeType = 'hard';
-end
-decodeType = lower(string(decodeType));
+TEB = zeros(size(P.EbN0_dB));
 
-TEB_ZF = zeros(size(P.EbN0dB));
-
-% Code convolutif simple (K=3, R=1/2)
-if useCoding
-    trellis = poly2trellis(3, [5 7]);
-    K = 3;
-    tblen = 5*(K-1);   % 10
-    if ~(decodeType=="hard" || decodeType=="soft")
-        error("simulate_ofdm_tgnb:BadDecodeType", "decodeType doit etre 'hard' ou 'soft'.");
-    end
+% ----- Codage convolutif (simple, taux 1/2) -----
+if activer_codage
+    treillis = poly2trellis(3, [5 7]);  % K=3, polynômes octaux (5,7)
+    profondeur_tb = 5*(3-1);            % règle simple : 5*(K-1)=10
 end
 
-for ii = 1:length(P.EbN0dB)
+for ii = 1:length(P.EbN0_dB)
 
-    % ===================== Bits =====================
-    if ~useCoding
-        Nb = P.Nu * Nsym * P.k;
-        bits = randi([0 1], Nb, 1);
-        bits_tx = bits;
-        Nsym_use = Nsym;
+    % ============================================================
+    % 1) Génération des bits
+    % ============================================================
+    if ~activer_codage
+        Nb = P.Nu * nb_symb_ofdm * P.k;
+        bits_info = randi([0 1], Nb, 1);
+        bits_a_moduler = bits_info;
+        nb_symb_utilises = nb_symb_ofdm;
     else
-        % bits d'info
-        Nb_info = P.Nu * Nsym * P.k;
-        bits = randi([0 1], Nb_info, 1);
+        Nb_info = P.Nu * nb_symb_ofdm * P.k;
+        bits_info = randi([0 1], Nb_info, 1);
 
-        % encodage R=1/2
-        codedBits = convenc(bits, trellis);   % ~2*Nb_info
-        bits_tx = codedBits;
+        bits_codes = convenc(bits_info, treillis);   % taux 1/2 => longueur doublée
+        bits_a_moduler = bits_codes;
 
-        % 2x plus de bits -> 2x plus de symboles OFDM transportés
-        Nsym_use = 2*Nsym;
+        % On transmet deux fois plus de symboles OFDM (car deux fois plus de bits)
+        nb_symb_utilises = 2 * nb_symb_ofdm;
     end
 
-    % ===================== Modulation QPSK =====================
-    symb = qammod(bits_tx, P.M, ...
+    % ============================================================
+    % 2) Modulation QPSK (via 4-QAM) - puissance moyenne unitaire
+    % ============================================================
+    symboles = qammod(bits_a_moduler, P.M, ...
         'InputType','bit', ...
         'UnitAveragePower',true);
 
-    % ===================== Grille OFDM =====================
-    Xf = zeros(P.N, Nsym_use);
-    Xf(P.dataIdx,:) = reshape(symb, P.Nu, Nsym_use);
+    % ============================================================
+    % 3) Construction trame OFDM en fréquence (Nfft x nb_symb)
+    % ============================================================
+    Xf = zeros(P.Nfft, nb_symb_utilises);
+    Xf(P.idx_data,:) = reshape(symboles, P.Nu, nb_symb_utilises);
 
-    % ===================== IFFT + CP =====================
-    xt = ifft(Xf, P.N, 1);
-    xt_cp = [xt(end-P.Ncp+1:end,:); xt];
-    x = xt_cp(:);
+    % ============================================================
+    % 4) IFFT + ajout préfixe cyclique
+    % ============================================================
+    xt = ifft(Xf, P.Nfft, 1);                         % (Nfft x nb_symb)
+    xt_cp = [xt(end-P.Ncp+1:end,:); xt];              % (Nfft+Ncp x nb_symb)
+    x = xt_cp(:);                                     % sérialisation
 
-    Ptx = mean(abs(x).^2);
+    puissance_tx = mean(abs(x).^2);
 
-    % ===================== Canal TGn-B =====================
-    y_chan = conv(x, h);
-    y_chan = y_chan(1:length(x));
+    % ============================================================
+    % 5) Canal TGn-B (convolution)
+    % ============================================================
+    y_canal = conv(x, h);
+    y_canal = y_canal(1:length(x));   % tronquage pour garder la même taille
 
-    % ===================== Bruit AWGN calibré Eb/N0 =====================
-    EbN0 = 10^(P.EbN0dB(ii)/10);
-    Pne = (P.N/P.Nu) * (Ptx/(2*P.k)) * (1/EbN0);  % variance complexe E|n|^2
-    n = sqrt(Pne/2) * (randn(size(x)) + 1j*randn(size(x)));
-    y = y_chan + n;
+    % ============================================================
+    % 6) Ajout AWGN calibré via Eb/N0 (formule du sujet)
+    % ============================================================
+    EbN0 = 10^(P.EbN0_dB(ii)/10);
 
-    % ===================== RX OFDM =====================
-    Yr = reshape(y, P.N+P.Ncp, Nsym_use);
-    yt = Yr(P.Ncp+1:end,:);
-    Yf = fft(yt, P.N, 1);
+    % Pne = E{|n|^2} (variance complexe)
+    Pne = (P.Nfft/P.Nu) * (puissance_tx/(2*P.k)) * (1/EbN0);
 
-    % ===================== Egalisation ZF =====================
-    Xhat = Yf ./ Heff;
+    bruit = sqrt(Pne/2) * (randn(size(x)) + 1j*randn(size(x)));
+    y = y_canal + bruit;
 
-    % ===================== Extraction data =====================
-    z = Xhat(P.dataIdx,:); 
-    z = z(:);   % symboles QPSK estimés (complexes)
+    % ============================================================
+    % 7) Récepteur OFDM : reshape, retrait CP, FFT
+    % ============================================================
+    Ybloc = reshape(y, P.Nfft+P.Ncp, nb_symb_utilises);
+    yt = Ybloc(P.Ncp+1:end,:);
+    Yf = fft(yt, P.Nfft, 1);
 
-    % ===================== Demod + (option) Viterbi =====================
-    if ~useCoding
-        % Non codé : décision dure classique
-        bits_hat = qamdemod(z, P.M, ...
-            'OutputType','bit', ...
-            'UnitAveragePower',true);
+    % ============================================================
+    % 8) Egalisation ZF par sous-porteuse
+    % ============================================================
+    Xhat_f = Yf ./ Heff;
 
+    % ============================================================
+    % 9) Démodulation + (option) décodage Viterbi hard
+    % ============================================================
+    z = Xhat_f(P.idx_data,:);
+    z = z(:);
+
+    bits_recus = qamdemod(z, P.M, ...
+        'OutputType','bit', ...
+        'UnitAveragePower',true);
+
+    if activer_codage
+        bits_estimes = vitdec(bits_recus, treillis, profondeur_tb, 'trunc', 'hard');
     else
-        if decodeType == "hard"
-            % --- Hard: decisions 0/1 puis Viterbi hard ---
-            coded_hat = qamdemod(z, P.M, ...
-                'OutputType','bit', ...
-                'UnitAveragePower',true);
-
-            bits_hat = vitdec(coded_hat, trellis, tblen, 'trunc', 'hard');
-
-        else
-            nsdec = 3;                 % nb bits de quantification soft
-            softMax = 2^nsdec - 1;     % valeur max
-            
-            % variance par dimension I/Q (approx) : Pne = E|n|^2 = E[nI^2+nQ^2]
-            sigma = sqrt(Pne/2);
-            
-            % Observations "BPSK" sur I et Q
-            rI = real(z) / sigma;
-            rQ = imag(z) / sigma;
-            
-            % Saturation (plage typique)
-            A = 4;                     % seuil de saturation (2..6 typique)
-            rI = max(min(rI, A), -A);
-            rQ = max(min(rQ, A), -A);
-            
-            % Mapping : r=+A => 0 (0 très certain), r=-A => softMax (1 très certain)
-            softI = round( (A - rI) * (softMax/(2*A)) );
-            softQ = round( (A - rQ) * (softMax/(2*A)) );
-            
-            % Mise en forme en vecteur [I Q I Q ...] attendu par vitdec
-            coded_soft = zeros(2*length(z),1);
-            coded_soft(1:2:end) = softI;
-            coded_soft(2:2:end) = softQ;
-            
-            % Décodage Viterbi soft quantifié
-            bits_hat = vitdec(coded_soft, trellis, tblen, 'trunc', 'soft', nsdec);
-        end
+        bits_estimes = bits_recus;
     end
 
-    % ===================== TEB =====================
-    TEB_ZF(ii) = mean(bits_hat ~= bits);
+    % ============================================================
+    % 10) Calcul TEB (comparaison aux bits d'information)
+    % ============================================================
+    TEB(ii) = mean(bits_estimes ~= bits_info);
 end
 
 end
