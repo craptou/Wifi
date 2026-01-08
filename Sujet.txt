@@ -1,0 +1,288 @@
+====================================================================
+SUJET BE OFDM – CHAÎNES DE TRANSMISSION NUMÉRIQUE
+====================================================================
+
+Objectif général
+----------------
+Le but de ce BE est de simuler une chaîne de transmission OFDM inspirée
+des systèmes WiFi (IEEE 802.11a), et d’étudier l’impact :
+- du canal multi-trajets (TGn-B),
+- du bruit AWGN,
+- de l’égalisation fréquentielle,
+- du codage canal (convolutif puis LDPC),
+- du poinçonnage,
+- de l’entrelacement,
+sur le taux d’erreur binaire (TEB).
+
+Le travail doit être structuré, modulaire, commenté, et justifiable à l’oral.
+L’utilisation pertinente des fonctions MATLAB est évaluée.
+
+
+====================================================================
+PARTIE 1 – CHAÎNE OFDM DE BASE
+====================================================================
+
+Paramètres OFDM (inspirés IEEE 802.11a)
+--------------------------------------
+- Taille FFT : Nfft = 64
+- Nombre de sous-porteuses utiles (data) : Nsd = 48
+- Préfixe cyclique : Ncp = 16
+- Modulation : QPSK
+- Fe = 20 MHz  =>  Ts = 50 ns
+
+Dans une première version simplifiée :
+- on ne considère pas les pilotes,
+- on place les 48 sous-porteuses data sur les 48 premières cases fréquentielles,
+- pas d’allocation centrée autour de la porteuse nulle.
+
+Chaîne d’émission
+-----------------
+bits -> modulation QPSK -> mapping OFDM -> IFFT -> préfixe cyclique
+
+Chaîne de réception
+-------------------
+suppression CP -> FFT -> égalisation -> démodulation -> décisions
+
+
+====================================================================
+PARTIE 2 – CANAL AWGN
+====================================================================
+
+Le canal est d’abord supposé idéal, puis bruité par un bruit blanc gaussien complexe.
+
+Le bruit AWGN est caractérisé par Eb/N0.
+La variance du bruit est calculée à partir de Eb/N0, du nombre de sous-porteuses
+utiles et de la puissance du signal OFDM transmis.
+
+Le TEB simulé est comparé au TEB théorique QPSK en AWGN :
+TEB_th = Q( sqrt(2*Eb/N0) )
+
+
+====================================================================
+PARTIE 3 – CANAL MULTI-TRAJETS TGn-B
+====================================================================
+
+Le canal TGn-B est un canal WiFi réaliste défini par :
+- des retards (en ns)
+- des puissances moyennes (en dB)
+
+Paramètres TGn-B :
+tau_ns = [0 10 20 30 50 80 110 140 170]
+p_db   = [0 -5.4 -10.8 -16.2 -21.6 -27 -32.4 -37.8 -43.2]
+
+Chaque trajet est modélisé par :
+- un retard discret (arrondi à Ts)
+- un coefficient complexe gaussien circulaire CN(0, p_lin)
+
+Le canal est supposé :
+- stationnaire sur toute la simulation,
+- parfaitement connu au récepteur.
+
+La réponse fréquentielle est :
+H[k] = FFT(h[n])
+
+On étudie :
+- l’impact du canal sur le TEB,
+- la réponse fréquentielle |H[k]| et arg(H[k]).
+
+
+====================================================================
+PARTIE 4 – ÉGALISATION FRÉQUENTIELLE
+====================================================================
+
+Une égalisation par sous-porteuse est mise en œuvre.
+
+Égalisation Zero Forcing (ZF) :
+X̂[k] = Y[k] / H[k]
+
+(Remarque : le ZF amplifie le bruit lorsque |H[k]| est faible.)
+
+La comparaison ZF / MMSE est optionnelle.
+L’égalisation MMSE peut être ajoutée mais n’est pas obligatoire.
+
+
+====================================================================
+PARTIE 5 – CODAGE CONVOLUTIF
+====================================================================
+
+Objectif
+--------
+Étudier l’apport du codage convolutif sur la chaîne OFDM.
+
+Code convolutif
+---------------
+- Code convolutif binaire
+- Longueur de contrainte K = 3
+- Polynômes générateurs (octal) : (5,7)
+- Code de base de taux R = 1/2
+
+Implémentation MATLAB :
+-----------------------
+trellis = poly2trellis(3,[5 7])
+codedBits = convenc(bits, trellis)
+bits_est = vitdec(bits_rx, trellis, tblen, 'trunc', 'hard')
+
+Le décodage Viterbi hard est suffisant dans un premier temps.
+
+Comparaisons demandées :
+------------------------
+- non codé
+- codé convolutif
+
+On observe le gain en TEB apporté par le codage canal.
+
+
+====================================================================
+PARTIE 5 bis – POINÇONNAGE
+====================================================================
+
+Objectif
+--------
+Étudier différents rendements de codage à partir du code R=1/2.
+
+Principe
+--------
+Le poinçonnage consiste à supprimer périodiquement certains bits codés
+afin d’augmenter le rendement du code.
+
+Rendements typiques :
+---------------------
+- R = 1/2 (pas de poinçonnage)
+- R = 2/3
+- R = 3/4
+
+Implémentation MATLAB :
+-----------------------
+Utilisation de matrices de poinçonnage avec :
+- convenc(bits, trellis, puncturePattern)
+- vitdec(bits_rx, trellis, tblen, 'trunc', 'hard', puncturePattern)
+
+Comparaison demandée :
+---------------------
+Comparer les TEB pour différents rendements.
+Discuter l’impact du poinçonnage sur les performances.
+
+
+====================================================================
+PARTIE 6 – ENTRELACEMENT IEEE 802.11a
+====================================================================
+
+Objectif
+--------
+Étudier l’impact de l’entrelacement défini dans la norme IEEE 802.11a.
+
+Important :
+-----------
+Il ne s’agit PAS d’un entrelacement arbitraire,
+mais de celui défini par la norme.
+
+Définitions
+-----------
+Nsd    = 48  (sous-porteuses data)
+Nbpsc  = log2(M)   (QPSK => 2)
+Ncbps  = Nsd * Nbpsc  (bits codés par symbole OFDM)
+s      = max(Nbpsc/2, 1)
+
+Entrelacement par symbole OFDM :
+--------------------------------
+
+Permutation 1 :
+i = (Ncbps/16) * (k mod 16) + floor(k/16)
+k = 0 .. Ncbps-1
+
+Permutation 2 :
+j = s * floor(i/s) + ( i + Ncbps - floor(16*i/Ncbps) ) mod s
+
+Les bits sont réordonnés selon l’indice j.
+
+Placement dans la chaîne :
+--------------------------
+TX :
+bits codés -> entrelacement -> modulation QPSK
+
+RX :
+démodulation -> désentrelacement -> décodage canal
+
+On compare les TEB :
+- sans entrelacement
+- avec entrelacement IEEE 802.11a
+
+
+====================================================================
+PARTIE 7 – CODAGE LDPC
+====================================================================
+
+Objectif
+--------
+Comparer les performances du code convolutif avec un code LDPC.
+
+Codes LDPC utilisés
+-------------------
+Codes LDPC quasi-cycliques (QC-LDPC), comme dans les normes WiFi / DVB.
+
+Construction :
+--------------
+- Une matrice de permutations P (entiers >=0 ou -1)
+- Un facteur d’expansion Z (blockSize)
+- La matrice de contrôle est :
+H = ldpcQuasiCyclicMatrix(Z, P)
+
+Implémentation MATLAB (fonctions imposées) :
+--------------------------------------------
+cfgEnc = ldpcEncoderConfig(H)
+cfgDec = ldpcDecoderConfig(H)
+
+Encodage :
+----------
+codeword = ldpcEncode(infoBits, cfgEnc)
+
+Décodage (itératif, entrées souples) :
+-------------------------------------
+[bits_dec, iter, syndrome] = ldpcDecode(Lch, cfgDec, itermax, ...
+    OutputFormat='info',
+    DecisionType='hard',
+    Termination='early')
+
+Important :
+-----------
+Le décodage LDPC nécessite des informations souples (LLR).
+Il faut donc calculer les LLR à partir de la sortie de l’égaliseur.
+
+Pour QPSK :
+-----------
+Si z est la sortie complexe égalisée,
+et Pne = E{|n|^2} la variance complexe du bruit :
+
+sigma2_reel = Pne / 2
+LLR_I = 2*Re(z)/sigma2_reel = 4*Re(z)/Pne
+LLR_Q = 4*Im(z)/Pne
+
+On fournit les LLR bit à bit au décodeur LDPC.
+
+Comparaisons demandées :
+-----------------------
+Comparer les TEB :
+- non codé
+- codé convolutif
+- codé LDPC
+
+Discuter les gains et la complexité.
+
+====================================================================
+PARTIE 8 – Estimation du canal de propagation en utilisant les porteuses pilotes
+====================================================================
+En pratique, le canal d’estimation est estim´e en utilis´e les 4 porteuses pilotes d´edi´ees. Vous mettrez en place cette estimation
+du canal de propagation, en supposant connues du r´ecepteur les informations transport´ees par les pilotes, et pourrez comparer
+les TEBs obtenus, losrque le canal de propagation est suppos´e parfaitement connu et lorsqu’il est estim´e `a partir des porteuses
+pilotes
+
+
+====================================================================
+REMARQUES GÉNÉRALES
+====================================================================
+
+- Le canal doit rester identique entre comparaisons (seed fixe).
+- Le code doit être clair, commenté, structuré.
+- Les noms de variables doivent être explicites.
+- Les hypothèses doivent pouvoir être justifiées à l’oral.
+- Il est acceptable d’utiliser les fonctions natives MATLAB.
