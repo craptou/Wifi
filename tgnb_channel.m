@@ -1,31 +1,18 @@
 function [h, H, Heff, delais_ech] = tgnb_channel(P, seed)
-%TGNB_CHANNEL  Génère une réalisation stationnaire du canal TGn-B.
-%
-% Sorties :
-%   h         : réponse impulsionnelle discrète du canal
-%   H         : réponse fréquentielle H[k] sur Nfft points (FFT de h)
-%   Heff      : H[k] 
-%   delais_ech: retards en nombre d'échantillons
-
+% Génère une réalisation du canal TGn-B
 
 rng(seed);
 
-% Conversion retards (ns) -> retards en échantillons
 delais_ech = round((P.tau_ns * 1e-9) / P.Te);
 Lh = max(delais_ech) + 1;
 
-% Réponse impulsionnelle : somme de trajets sur les mêmes indices de retard
-h = zeros(Lh,1);
+h = zeros(Lh, 1);
 for k = 1:length(P.tau_ns)
-    % coefficient complexe gaussien : CN(0, p_lin(k))
     beta = sqrt(P.p_lin(k)/2) * (randn + 1j*randn);
     h(delais_ech(k)+1) = h(delais_ech(k)+1) + beta;
 end
 
-% Réponse fréquentielle sur Nfft
 H = fft(h, P.Nfft);
-
 Heff = H;
-
 
 end

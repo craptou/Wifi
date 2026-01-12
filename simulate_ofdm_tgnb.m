@@ -1,56 +1,33 @@
 function TEB = simulate_ofdm_tgnb(P, nb_symb_ofdm, h, Heff, type_code, rendement_code)
-%SIMULATE_OFDM_TGNB  Simulation OFDM sur canal TGn-B + AWGN, égalisation ZF.
-%
-% Entrées :
-%   P              : paramètres (struct)
-%   nb_symb_ofdm   : nombre de symboles OFDM simulés (sans codage)
-%   h, Heff        : canal (fixe) en temporel et fréquentiel
-%   type_code      : 'none', 'conv', ou 'ldpc'
-%   rendement_code : pour 'conv': 0, 1/2, 2/3, 3/4 ; pour 'ldpc': ignoré (R=1/2 fixe)
+% Simulation OFDM sur canal TGn-B + AWGN, égalisation ZF
 
 TEB = zeros(size(P.EbN0_dB));
 
-% ----- Configuration du codage selon le type -----
+% Configuration du codage
 if strcmp(type_code, 'none')
     activer_codage = false;
-    type_codage = 'none';  % Définir pour éviter erreurs ultérieures
+    type_codage = 'none';
     
 elseif strcmp(type_code, 'conv')
     activer_codage = true;
     type_codage = 'convolutif';
+    treillis = poly2trellis(3, P.poly_oct);
+    profondeur_tb = 10;
     
-    % Codage convolutif avec poinçonnage
-    treillis = poly2trellis(3, P.poly_oct);  % K=3, polynômes octaux
-    profondeur_tb = 5*(3-1);                 % règle simple : 5*(K-1)=10
-    
-    % Sélection de la matrice de poinçonnage selon le rendement
     if abs(rendement_code - 1/2) < 1e-6
         mat_punc = P.punc_1_2;
     elseif abs(rendement_code - 2/3) < 1e-6
         mat_punc = P.punc_2_3;
-    elseif abs(rendement_code - 3/4) < 1e-6
-        mat_punc = P.punc_3_4;
     else
-        error('Rendement convolutif non supporté : utilisez 1/2, 2/3, ou 3/4');
+        mat_punc = P.punc_3_4;
     end
     
-elseif strcmp(type_code, 'ldpc')
+else
     activer_codage = true;
     type_codage = 'ldpc';
     
-    % ----- Construction matrice LDPC selon PARTIE 7 du sujet -----
-    % Codes LDPC WiFi = codes QC-LDPC (quasi-cycliques)
-    % Définis par :
-    %   - blockSize Z : facteur d'expansion (taille des blocs circulants ZxZ)
-    %   - Pmat : matrice de permutations
-    %            -1 => bloc nul (matrice ZxZ de zéros)
-    %            l >= 0 => permutation cyclique de l colonnes (décalage circulaire)
-    % Matrice de contrôle de parité : H = ldpcQuasiCyclicMatrix(blockSize, Pmat)
-    
-    blockSize = 27;  % facteur d'expansion Z = 27
-    % Matrice de permutation IEEE 802.11n pour R=1/2, N=648, K=324
-    % Dimension de Pmat : (n-k)/Z x n/Z = 12 x 24
-    % => H sera de taille : (12*27) x (24*27) = 324 x 648
+    % Matrice LDPC R=1/2, N=648
+    blockSize = 27;
     P_ldpc = [
         0 -1 -1 -1  0  0 -1 -1  0 -1 -1  0  1  0 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1;
        22  0 -1 -1 17 -1  0  0 12 -1 -1 -1 -1  0  0 -1 -1 -1 -1 -1 -1 -1 -1 -1;
@@ -65,267 +42,164 @@ elseif strcmp(type_code, 'ldpc')
        25 -1  8 -1 23 18 -1 14  9 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1  0  0;
         3 -1 -1 -1 16 -1 -1  2 25  5 -1 -1  1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1  0
     ];
-    
-    % Construction de la matrice H (sparse logical)
     H_ldpc = ldpcQuasiCyclicMatrix(blockSize, P_ldpc);
-    
-    % ----- Configuration encodeur/décodeur LDPC (fonctions imposées par le sujet) -----
     cfg_ldpc_enc = ldpcEncoderConfig(H_ldpc);
-    % cfg_ldpc_enc contient :
-    %   - NumInformationBits (k) = 324
-    %   - BlockLength (n) = 648
-    %   - CodeRate = k/n = 1/2
-    
     cfg_ldpc_dec = ldpcDecoderConfig(H_ldpc);
-    % Décodeur par défaut : belief propagation (BP)
-    % Autres algorithmes possibles : 'layered-bp', 'norm-min-sum', 'offset-min-sum'
-    
-else
-    error('Type de code non reconnu : utilisez ''none'', ''conv'' ou ''ldpc''');
 end
 
 for ii = 1:length(P.EbN0_dB)
 
-    % ============================================================
-    % 1) Génération des bits et codage
-    % ============================================================
+    % Génération des bits et codage
     if ~activer_codage
-        % Cas non codé
         Nb = P.Nu * nb_symb_ofdm * P.k;
         bits_info = randi([0 1], Nb, 1);
         bits_a_moduler = bits_info;
         nb_symb_utilises = nb_symb_ofdm;
         
     elseif strcmp(type_codage, 'convolutif')
-        % Cas codé convolutif avec poinçonnage
         Nb_info = P.Nu * nb_symb_ofdm * P.k;
         bits_info = randi([0 1], Nb_info, 1);
-
-        % Codage convolutif avec poinçonnage
         bits_codes = convenc(bits_info, treillis, mat_punc);
         
-        % Calcul du nombre de symboles OFDM nécessaires après codage
-        Ncbps = P.Nu * P.k;  % bits codés par symbole OFDM
+        Ncbps = P.Nu * P.k;
         nb_symb_necessaires = ceil(length(bits_codes) / Ncbps);
         Nb_cible = nb_symb_necessaires * Ncbps;
         
-        % Padding si nécessaire pour remplir des symboles OFDM complets
         if length(bits_codes) < Nb_cible
             bits_codes = [bits_codes; zeros(Nb_cible - length(bits_codes), 1)];
         end
         
-        % Entrelacement (si activé)
         if P.activer_entrelacement
-            Nbpsc = P.k;  % bits par sous-porteuse (2 pour QPSK)
-            bits_entrelaces = entrelaceur_80211a(bits_codes, Ncbps, Nbpsc);
-            bits_a_moduler = bits_entrelaces;
+            bits_a_moduler = entrelaceur_80211a(bits_codes, Ncbps, P.k);
         else
             bits_a_moduler = bits_codes;
         end
-        
         nb_symb_utilises = nb_symb_necessaires;
         
-    elseif strcmp(type_codage, 'ldpc')
-        % Cas codé LDPC (R=1/2, N=648, K=324)
-        % On encode par blocs de K=324 bits
-        
-        % Nombre de blocs LDPC nécessaires
+    else
+        % LDPC
         Nb_info_total = P.Nu * nb_symb_ofdm * P.k;
         nb_blocs_ldpc = ceil(Nb_info_total / P.ldpc_K);
-        
-        % Génération des bits d'information avec padding éventuel
-        % IMPORTANT : utiliser double, pas entier
         Nb_info_necessaire = nb_blocs_ldpc * P.ldpc_K;
         bits_info = double(randi([0 1], Nb_info_necessaire, 1));
-        Nb_info_utile = Nb_info_total;  % pour le calcul du TEB final
-        
-        % Sauvegarde des bits info originaux pour comparaison TEB
+        Nb_info_utile = Nb_info_total;
         bits_info_originaux = bits_info;
         
-        % Codage LDPC bloc par bloc
         bits_codes_ldpc = zeros(nb_blocs_ldpc * P.ldpc_N, 1);
         for bloc = 1:nb_blocs_ldpc
             debut_info = (bloc-1) * P.ldpc_K + 1;
             fin_info = bloc * P.ldpc_K;
-            bloc_info = bits_info(debut_info:fin_info);
-            
-            % Encodage LDPC (entrée doit être double)
-            bloc_code = ldpcEncode(double(bloc_info), cfg_ldpc_enc);
-            
+            bloc_code = ldpcEncode(double(bits_info(debut_info:fin_info)), cfg_ldpc_enc);
             debut_code = (bloc-1) * P.ldpc_N + 1;
             fin_code = bloc * P.ldpc_N;
             bits_codes_ldpc(debut_code:fin_code) = double(bloc_code);
         end
         
-        % Calcul du nombre de symboles OFDM nécessaires
         Ncbps = P.Nu * P.k;
         nb_symb_necessaires = ceil(length(bits_codes_ldpc) / Ncbps);
         Nb_cible = nb_symb_necessaires * Ncbps;
         
-        % Padding final si nécessaire
         if length(bits_codes_ldpc) < Nb_cible
             bits_codes_ldpc = [bits_codes_ldpc; zeros(Nb_cible - length(bits_codes_ldpc), 1)];
         end
         
-        bits_a_moduler = bits_codes_ldpc;
+        if P.activer_entrelacement
+            bits_a_moduler = entrelaceur_80211a(bits_codes_ldpc, Ncbps, P.k);
+        else
+            bits_a_moduler = bits_codes_ldpc;
+        end
         nb_symb_utilises = nb_symb_necessaires;
     end
 
-    % ============================================================
-    % 2) Modulation QPSK (via 4-QAM) - puissance moyenne unitaire
-    % ============================================================
-    symboles = qammod(bits_a_moduler, P.M, ...
-        'InputType','bit', ...
-        'UnitAveragePower',true);
+    % Modulation QPSK
+    symboles = qammod(bits_a_moduler, P.M, 'InputType', 'bit', 'UnitAveragePower', true);
 
-    % ============================================================
-    % 3) Construction trame OFDM en fréquence (Nfft x nb_symb)
-    % ============================================================
+    % Trame OFDM
     Xf = zeros(P.Nfft, nb_symb_utilises);
-    Xf(P.idx_data,:) = reshape(symboles, P.Nu, nb_symb_utilises);
+    Xf(P.idx_data_80211a,:) = reshape(symboles, P.Nu, nb_symb_utilises);
 
-    % ============================================================
-    % 4) IFFT + ajout préfixe cyclique
-    % ============================================================
-    xt = ifft(Xf, P.Nfft);                         % (Nfft x nb_symb)
-    xt_cp = [xt(end-P.Ncp+1:end,:); xt];              % (Nfft+Ncp x nb_symb)
-    x = xt_cp(:);                                     
+    % IFFT + CP
+    xt = ifft(Xf, P.Nfft);
+    xt_cp = [xt(end-P.Ncp+1:end,:); xt];
+    x = xt_cp(:);
     puissance_tx = mean(abs(x).^2);
 
-    % ============================================================
-    % 5) Canal TGn-B (convolution)
-    % ============================================================
+    % Canal
     y_canal = conv(x, h);
-    y_canal = y_canal(1:length(x));   % tronquage pour garder la même taille
+    y_canal = y_canal(1:length(x));
 
-    % ============================================================
-    % 6) Ajout bruit AWGN
-    % ============================================================
+    % Bruit AWGN
     EbN0 = 10^(P.EbN0_dB(ii)/10);
-
-    % Pne = E{|n|^2} (variance complexe)
     Pne = (P.Nfft/P.Nu) * (puissance_tx/(2*P.k)) * (1/EbN0);
-
     bruit = sqrt(Pne/2) * (randn(size(x)) + 1j*randn(size(x)));
     y = y_canal + bruit;
 
-    % ============================================================
-    % 7) Récepteur OFDM : reshape, retrait CP, FFT
-    % ============================================================
+    % Réception OFDM
     Ybloc = reshape(y, P.Nfft+P.Ncp, nb_symb_utilises);
     yt = Ybloc(P.Ncp+1:end,:);
     Yf = fft(yt, P.Nfft, 1);
 
-    % ============================================================
-    % 8) Egalisation ZF par sous-porteuse
-    % ============================================================
+    % Egalisation ZF
     Xhat_f = Yf ./ Heff;
     
-    % Protection contre NaN/Inf (évanouissements profonds du canal)
-    Xhat_f(isnan(Xhat_f)) = 0;
-    Xhat_f(isinf(Xhat_f)) = 0;
-
-    % ============================================================
-    % 9) Démodulation + décodage
-    % ============================================================
-    z = Xhat_f(P.idx_data,:);
+    % Démodulation
+    z = Xhat_f(P.idx_data_80211a,:);
     z = z(:);
 
-    % Pour LDPC : démodulation soft (LLRs), sinon démodulation hard (bits)
     if strcmp(type_codage, 'ldpc')
-        % Démodulation souple pour LDPC selon PARTIE 7 du sujet
-        % IMPORTANT : Après égalisation ZF, le bruit est amplifié !
-        % Si Y = X*H + N avec N ~ CN(0, Pne)
-        % Alors z = Y/H = X + N/H
-        % La variance effective du bruit après ZF est : Pne_eff[k] = Pne / |H[k]|²
-        
-        % Calcul de la variance effective moyenne sur les sous-porteuses
-        Heff_data = Heff(P.idx_data);  % réponse canal sur sous-porteuses données
+        Heff_data = Heff(P.idx_data);
         Pne_eff_moyen = Pne / mean(abs(Heff_data).^2);
-        
-        % Utilisation de qamdemod avec LLR (gère correctement la convention des signes)
-        % NoiseVariance doit être la variance du bruit APRÈS égalisation
-        llrs_recus = qamdemod(z, P.M, ...
-            'OutputType', 'llr', ...
-            'UnitAveragePower', true, ...
-            'NoiseVariance', Pne_eff_moyen);
-        
-        % S'assurer que les LLRs sont en double et sans NaN/Inf
+        llrs_recus = qamdemod(z, P.M, 'OutputType', 'llr', 'UnitAveragePower', true, 'NoiseVariance', Pne_eff_moyen);
         llrs_recus = double(llrs_recus);
         llrs_recus(isnan(llrs_recus)) = 0;
-        llrs_recus(isinf(llrs_recus) & llrs_recus > 0) = 30;   % saturation positive
-        llrs_recus(isinf(llrs_recus) & llrs_recus < 0) = -30;  % saturation négative
+        llrs_recus(isinf(llrs_recus)) = sign(llrs_recus(isinf(llrs_recus))) * 30;
     else
-        % Démodulation hard pour non-codé et convolutif
-        bits_recus = qamdemod(z, P.M, ...
-            'OutputType','bit', ...
-            'UnitAveragePower',true);
+        bits_recus = qamdemod(z, P.M, 'OutputType', 'bit', 'UnitAveragePower', true);
     end
 
+    % Décodage
     if ~activer_codage
-        % Cas non codé
         bits_estimes = bits_recus;
         
     elseif strcmp(type_codage, 'convolutif')
-        % Cas codé convolutif
-        
-        % Désentrelacement (si activé)
         if P.activer_entrelacement
             Ncbps = P.Nu * P.k;
-            Nbpsc = P.k;
-            bits_desentrelaces = desentrelaceur_80211a(bits_recus, Ncbps, Nbpsc);
-            bits_a_decoder = bits_desentrelaces;
+            bits_a_decoder = desentrelaceur_80211a(bits_recus, Ncbps, P.k);
         else
             bits_a_decoder = bits_recus;
         end
-        
-        % Décodage Viterbi avec poinçonnage
         bits_estimes_brut = vitdec(bits_a_decoder, treillis, profondeur_tb, 'trunc', 'hard', mat_punc);
-        
-        % Retrait du padding éventuel pour correspondre à bits_info
         bits_estimes = bits_estimes_brut(1:Nb_info);
         
-    elseif strcmp(type_codage, 'ldpc')
-        % Cas codé LDPC avec démodulation soft
+    else
+        % LDPC
+        if P.activer_entrelacement
+            Ncbps = P.Nu * P.k;
+            llrs_recus = desentrelaceur_80211a(llrs_recus, Ncbps, P.k);
+        end
         
-        % Décodage LDPC bloc par bloc
         bits_decodes_ldpc = zeros(nb_blocs_ldpc * P.ldpc_K, 1);
-        
         for bloc = 1:nb_blocs_ldpc
             debut_code = (bloc-1) * P.ldpc_N + 1;
             fin_code = bloc * P.ldpc_N;
-            
-            % Vérification de la longueur disponible
             if fin_code <= length(llrs_recus)
                 llr_bloc = llrs_recus(debut_code:fin_code);
             else
-                % Padding si on dépasse (cas du dernier bloc)
                 longueur_disponible = length(llrs_recus) - debut_code + 1;
                 llr_bloc = [llrs_recus(debut_code:end); zeros(P.ldpc_N - longueur_disponible, 1)];
             end
-            
-            % Décodage LDPC itératif avec LLRs (selon PARTIE 7 du sujet)
-            % ldpcDecode : entrée = LLRs canal (vecteur de n valeurs doubles)
-            %              sortie = bits décodés (k bits si OutputFormat='info')
-            % IMPORTANT : LLRs doivent être en double
             [bloc_decode, ~, ~] = ldpcDecode(double(llr_bloc), cfg_ldpc_dec, P.ldpc_nb_iter, ...
                 'OutputFormat', 'info', 'DecisionType', 'hard', 'Termination', 'early');
-            
             debut_info = (bloc-1) * P.ldpc_K + 1;
             fin_info = bloc * P.ldpc_K;
             bits_decodes_ldpc(debut_info:fin_info) = bloc_decode;
         end
         
-        % Retrait du padding pour correspondre aux bits d'information utiles
         bits_estimes = bits_decodes_ldpc(1:Nb_info_utile);
-        
-        % Utiliser les bits info originaux (sauvegardés avant toute modification)
         bits_info = bits_info_originaux(1:Nb_info_utile);
     end
 
-    % ============================================================
-    % 10) Calcul TEB 
-    % ============================================================
+    % Calcul TEB
     TEB(ii) = mean(bits_estimes ~= bits_info);
 end
 
